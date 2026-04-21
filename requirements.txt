@@ -1,0 +1,6 @@
+streamlit==1.40.2
+requests==2.32.3
+openpyxl==3.1.5
+pydantic==2.10.3
+python-dotenv==1.0.1
+PyYAML==6.0.2

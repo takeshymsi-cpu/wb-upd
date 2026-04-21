@@ -1,0 +1,29 @@
+# Секреты и личные данные
+.env
+settings.yaml
+
+# Рабочие данные
+storage.db
+*.db
+/output/
+/cache/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+build/
+dist/
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/
+.claude/
+*.log
+
+# Сборка локальных приложений
+*.app/
