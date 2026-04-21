@@ -59,22 +59,50 @@ def _save_token_to_env(token: str) -> None:
     env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+WB_TOKEN_URL = "https://seller.wildberries.ru/supplier-settings/access-to-api"
+
+
 # ---- сайдбар: статус подключения к WB ------------------------------------
 def _render_token_form(error_msg: str | None = None) -> None:
     """Форма ввода токена WB. Показывается, если токена нет или он неверный."""
     if error_msg:
         st.error(error_msg)
-    st.markdown(
-        "Токен можно получить в кабинете продавца WB: "
-        "**Настройки → Доступ к API** (право «Документы»)."
+
+    st.link_button(
+        "🔗 Открыть страницу токенов в WB",
+        WB_TOKEN_URL,
+        use_container_width=True,
     )
+
+    with st.expander("📋 Как создать токен (пошагово)", expanded=False):
+        st.markdown(
+            """
+1. Открой ссылку выше → кнопка **«Создать токен»**.
+2. Вкладка **«Для интеграции вручную»**.
+3. Тип токена: **«Базовый токен»** (для сторонних решений).
+4. **Название**: любое, например `wb upd`.
+5. **К каким категориям будет доступ**: поставь галку только на **«Документы»**.
+6. **Уровень доступа**: **«Только чтение»** — этого достаточно.
+7. **«Создать токен»** → скопируй появившуюся JWT-строку (длинная, начинается
+   на `eyJ…`).
+8. Вставь её в поле ниже и нажми «Подключиться».
+
+> Токен хранится **только у тебя на компьютере** (в `.env` и/или в памяти
+> браузера). Никуда не отправляется, кроме самого WB API.
+"""
+        )
+
+    # В Streamlit нет прямого способа отключить autocomplete у text_input,
+    # поэтому используем обычное (не password) поле — Chrome не станет
+    # предлагать сгенерировать пароль и не подсунет autofill.
+    # JWT-токен и так не содержит персональных данных, видимых на экране.
     with st.form("wb_token_form", clear_on_submit=False):
         new_tok = st.text_input(
             "WB API токен",
             value=st.session_state.wb_token,
-            type="password",
             placeholder="eyJhbGciOi...",
             help="JWT-строка из кабинета WB. Хранится только у тебя.",
+            autocomplete="off",
         )
         save_to_env = st.checkbox(
             "Сохранить в .env (чтобы не вводить снова)", value=True
