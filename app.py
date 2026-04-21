@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import os
 import time
 import zipfile
 from datetime import date, datetime
@@ -24,50 +25,125 @@ init_db()
 # ---- инициализация состояния ---------------------------------------------
 if "settings" not in st.session_state:
     st.session_state.settings = load_settings()
+# Токен хранится в session_state; по умолчанию — из .env
+if "wb_token" not in st.session_state:
+    st.session_state.wb_token = os.getenv("WB_API_TOKEN", "")
 
 settings: Settings = st.session_state.settings
 
 
 # ---- кеш клиента и профиля WB (чтобы не долбить API на каждом rerun) -----
 @st.cache_resource
-def get_wb_client() -> WBClient:
-    return WBClient()
+def get_wb_client(token: str) -> WBClient:
+    return WBClient(token=token)
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def get_wb_profile() -> dict:
-    """Кеш профиля продавца на 1 час. Только успешный ответ кешируется —
-    исключение прокидывается наружу и НЕ кешируется."""
-    p = get_wb_client().get_seller_profile()
+def get_wb_profile(token: str) -> dict:
+    """Кеш профиля продавца на 1 час. Ключом кеша служит токен —
+    при смене токена кеш автоматически промахивается. Исключения
+    не кешируются."""
+    p = get_wb_client(token).get_seller_profile()
     return {"name": p.name, "inn": p.inn, "trade_mark": p.trade_mark, "sid": p.sid}
 
 
+def _save_token_to_env(token: str) -> None:
+    """Сохраняет WB_API_TOKEN в .env рядом с app.py (создаёт или обновляет)."""
+    env_path = Path(__file__).parent / ".env"
+    lines: list[str] = []
+    if env_path.exists():
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip().startswith("WB_API_TOKEN="):
+                lines.append(line)
+    lines.append(f"WB_API_TOKEN={token}")
+    env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 # ---- сайдбар: статус подключения к WB ------------------------------------
+def _render_token_form(error_msg: str | None = None) -> None:
+    """Форма ввода токена WB. Показывается, если токена нет или он неверный."""
+    if error_msg:
+        st.error(error_msg)
+    st.markdown(
+        "Токен можно получить в кабинете продавца WB: "
+        "**Настройки → Доступ к API** (право «Документы»)."
+    )
+    with st.form("wb_token_form", clear_on_submit=False):
+        new_tok = st.text_input(
+            "WB API токен",
+            value=st.session_state.wb_token,
+            type="password",
+            placeholder="eyJhbGciOi...",
+            help="JWT-строка из кабинета WB. Хранится только у тебя.",
+        )
+        save_to_env = st.checkbox(
+            "Сохранить в .env (чтобы не вводить снова)", value=True
+        )
+        submitted = st.form_submit_button(
+            "✅ Подключиться", type="primary", use_container_width=True
+        )
+        if submitted:
+            tok = new_tok.strip()
+            if not tok:
+                st.warning("Токен не должен быть пустым.")
+            else:
+                st.session_state.wb_token = tok
+                if save_to_env:
+                    try:
+                        _save_token_to_env(tok)
+                    except Exception as e:
+                        st.warning(f"Не удалось записать в .env: {e}")
+                get_wb_client.clear()
+                get_wb_profile.clear()
+                st.rerun()
+
+
 with st.sidebar:
     st.markdown("### 🔑 Подключение к WB")
     client = None
     profile = None
-    try:
-        client = get_wb_client()
-        prof = get_wb_profile()
-        from types import SimpleNamespace
-        profile = SimpleNamespace(**prof)
-        st.success(f"{profile.name}\n\nИНН: `{profile.inn}`")
-        st.caption(f"Бренд: {profile.trade_mark}")
-        if st.button("🔄 Обновить профиль", use_container_width=True):
-            get_wb_profile.clear()
-            st.rerun()
-    except WBError as e:
-        st.error(str(e))
-    except Exception as e:
-        msg = str(e)
-        if "429" in msg:
-            st.error("WB API: слишком много запросов. Подождите ~1 минуту.")
-        else:
-            st.error(f"Ошибка WB API: {msg}")
-        if st.button("🔄 Попробовать снова"):
-            get_wb_profile.clear()
-            st.rerun()
+    token = st.session_state.wb_token
+
+    if not token:
+        _render_token_form("Токен WB не задан.")
+    else:
+        try:
+            client = get_wb_client(token)
+            prof = get_wb_profile(token)
+            from types import SimpleNamespace
+            profile = SimpleNamespace(**prof)
+            st.success(f"{profile.name}\n\nИНН: `{profile.inn}`")
+            st.caption(f"Бренд: {profile.trade_mark}")
+            c_r, c_t = st.columns(2)
+            if c_r.button("🔄 Обновить", use_container_width=True):
+                get_wb_profile.clear()
+                st.rerun()
+            if c_t.button("🔑 Сменить токен", use_container_width=True):
+                st.session_state.wb_token = ""
+                get_wb_client.clear()
+                get_wb_profile.clear()
+                st.rerun()
+        except WBError as e:
+            client = None
+            _render_token_form(str(e))
+        except Exception as e:
+            msg = str(e)
+            if "429" in msg:
+                st.error("WB API: слишком много запросов. Подождите ~1 минуту.")
+                if st.button("🔄 Попробовать снова"):
+                    get_wb_profile.clear()
+                    st.rerun()
+            elif "401" in msg or "403" in msg:
+                client = None
+                _render_token_form(
+                    "Токен не принят WB API (401/403). Проверь, что токен "
+                    "живой и у него есть право «Документы»."
+                )
+            else:
+                st.error(f"Ошибка WB API: {msg}")
+                if st.button("🔄 Попробовать снова"):
+                    get_wb_profile.clear()
+                    st.rerun()
 
     st.divider()
     st.markdown("### 📁 Папка вывода")
