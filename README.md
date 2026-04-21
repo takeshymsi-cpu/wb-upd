@@ -22,7 +22,9 @@
 
 Нужен **Python 3.9+**.
 
-## 1. Запускаем Терминал и 
+## 1. Запускаем Терминал
+
+<img width="291" height="73" alt="Снимок экрана 2026-04-21 в 22 32 53" src="https://github.com/user-attachments/assets/696a4265-c28b-4a58-99d8-a43fc7b924b2" />
 
 ## 2. Вставляем код (тем самым скачиваем и устанавливаем проект)
 
@@ -40,23 +42,6 @@ pip install -r requirements.txt
 ```bash
 streamlit run app.py
 ```
-
-> 👋 Welcome to Streamlit!
->
-> If you’d like to receive helpful onboarding emails, news, offers, promotions,
-> and the occasional swag, please enter your email address below. Otherwise,
-> leave this field blank.
->
-> Email:  
-
-Перевод
->👋 Добро пожаловать в Streamlit!
->
->Если вы хотите получать полезные электронные письма о начале работы, новости, предложения, акции,
->и иногда сувениры, пожалуйста, введите свой адрес электронной почты ниже. В противном случае,
->оставьте это поле пустым.
-
-После ввода Email 
 
 Откроется http://localhost:8501.
 
