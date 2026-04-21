@@ -66,6 +66,16 @@ class WBClient:
         self.session.headers["Authorization"] = self.token
 
     # ---- common-api ----------------------------------------------------
+    def ping(self) -> bool:
+        """Быстрая проверка токена. True — токен живой, иначе исключение.
+
+        Эндпоинт `/ping` не лимитируется WB и годится для первичной
+        валидации без риска поймать 429.
+        """
+        r = self.session.get(f"{COMMON_API}/ping", timeout=self.timeout)
+        r.raise_for_status()
+        return r.json().get("Status") == "OK"
+
     def get_seller_profile(self) -> SellerProfile:
         # `/seller-info` у WB жёстко лимитирован (~1 rpm), поэтому держим
         # несколько ретраев с экспоненциальным backoff на 429.

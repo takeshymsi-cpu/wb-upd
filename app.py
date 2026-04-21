@@ -16,7 +16,7 @@ from upd_builder import build_upd_xml
 from wb_client import WBClient, WBError
 from xlsx_parser import extract_xlsx_from_zip, parse_notice_xlsx
 
-st.set_page_config(page_title="WB → УПД → Диадок", page_icon="🧾", layout="wide")
+st.set_page_config(page_title="Уведомление → УПД", page_icon="🧾", layout="wide")
 
 OUTPUT_DIR = Path(__file__).parent / "output"
 OUTPUT_DIR.mkdir(exist_ok=True)
@@ -68,9 +68,11 @@ def _render_token_form(error_msg: str | None = None) -> None:
     with st.expander("📋 Как создать токен (пошагово)", expanded=False):
         st.markdown(
             """
-1. В кабинете продавца WB: **Настройки → Доступ к API** → **«Создать токен»**.
+1. В кабинете продавца WB: **Профиль → Интеграции по API** → **«Создать токен»**.
 2. Вкладка **«Для интеграции вручную»**.
-3. Тип токена: **«Базовый токен»** (для сторонних решений).
+3. Тип токена: **«Персональный токен»** (только для своих решений).
+   ⚠️ Именно персональный, не «Базовый» — у базового ограничен доступ
+   к `/seller-info` и быстро ловит 429.
 4. **Название**: любое, например `wb upd`.
 5. **К каким категориям будет доступ**: поставь галку только на **«Документы»**.
 6. **Уровень доступа**: **«Только чтение»** — этого достаточно.
@@ -126,13 +128,44 @@ with st.sidebar:
     if not token:
         _render_token_form("Токен WB не задан.")
     else:
+        # Клиент создаём всегда — он валиден, пока есть токен.
+        # Профиль продавца подтягиваем опционально: ручка /seller-info
+        # очень жёстко лимитирована WB (~1 rpm), и требовать её работу
+        # при каждом заходе — значит ломать весь UI из-за 429.
         try:
             client = get_wb_client(token)
-            prof = get_wb_profile(token)
-            from types import SimpleNamespace
-            profile = SimpleNamespace(**prof)
-            st.success(f"{profile.name}\n\nИНН: `{profile.inn}`")
-            st.caption(f"Бренд: {profile.trade_mark}")
+        except WBError as e:
+            client = None
+            _render_token_form(str(e))
+
+        if client:
+            try:
+                prof = get_wb_profile(token)
+                from types import SimpleNamespace
+                profile = SimpleNamespace(**prof)
+                st.success(f"{profile.name}\n\nИНН: `{profile.inn}`")
+                st.caption(f"Бренд: {profile.trade_mark}")
+            except Exception as e:
+                msg = str(e)
+                if "401" in msg or "403" in msg:
+                    # Токен действительно битый → перезапрашиваем
+                    client = None
+                    _render_token_form(
+                        "Токен не принят WB API (401/403). Проверь, что "
+                        "токен живой и у него есть право «Документы»."
+                    )
+                elif "429" in msg:
+                    st.success("✅ Токен сохранён")
+                    st.warning(
+                        "Профиль продавца сейчас не подтянулся — WB временно "
+                        "ограничил запросы к `/seller-info` (это нормальная "
+                        "реакция WB ~1 раз/мин). Можно спокойно идти на "
+                        "вкладку «Уведомления» — там другие лимиты."
+                    )
+                else:
+                    st.warning(f"Профиль не загрузился: {msg}")
+
+        if client:
             c_r, c_t = st.columns(2)
             if c_r.button("🔄 Обновить", use_container_width=True):
                 get_wb_profile.clear()
@@ -142,27 +175,6 @@ with st.sidebar:
                 get_wb_client.clear()
                 get_wb_profile.clear()
                 st.rerun()
-        except WBError as e:
-            client = None
-            _render_token_form(str(e))
-        except Exception as e:
-            msg = str(e)
-            if "429" in msg:
-                st.error("WB API: слишком много запросов. Подождите ~1 минуту.")
-                if st.button("🔄 Попробовать снова"):
-                    get_wb_profile.clear()
-                    st.rerun()
-            elif "401" in msg or "403" in msg:
-                client = None
-                _render_token_form(
-                    "Токен не принят WB API (401/403). Проверь, что токен "
-                    "живой и у него есть право «Документы»."
-                )
-            else:
-                st.error(f"Ошибка WB API: {msg}")
-                if st.button("🔄 Попробовать снова"):
-                    get_wb_profile.clear()
-                    st.rerun()
 
     st.divider()
     st.markdown("### 📁 Папка вывода")
@@ -186,12 +198,34 @@ with tab_settings:
 
     col_auto1, col_auto2 = st.columns([1, 3])
     with col_auto1:
-        if st.button("🔄 Подтянуть из WB API", use_container_width=True, disabled=profile is None,
-                     help="Заберёт ИНН, фамилию и бренд из WB"):
-            if profile:
-                settings.seller.trade_mark = profile.trade_mark
-                settings.seller.inn = profile.inn
-                nm = profile.name.replace("ИП", "").strip()
+        pull_clicked = st.button(
+            "🔄 Подтянуть из WB API",
+            use_container_width=True,
+            disabled=client is None,
+            help="Заберёт ИНН, фамилию и бренд из WB (ручка /seller-info; "
+                 "WB жёстко её лимитирует — будет несколько ретраев)",
+        )
+        if pull_clicked and client is not None:
+            # Тянем профиль прямо здесь с собственными ретраями,
+            # чтобы 429 на /seller-info не блокировал весь сайдбар.
+            with st.spinner("Запрашиваю профиль у WB (до ~1 минуты)…"):
+                prof_data = None
+                last_err = None
+                for attempt in range(4):
+                    try:
+                        prof_data = get_wb_profile(token)
+                        break
+                    except Exception as e:
+                        last_err = e
+                        if "429" in str(e) and attempt < 3:
+                            time.sleep(15 * (attempt + 1))  # 15 / 30 / 45 сек
+                            get_wb_profile.clear()
+                            continue
+                        break
+            if prof_data:
+                settings.seller.trade_mark = prof_data.get("trade_mark", "")
+                settings.seller.inn = prof_data.get("inn", "")
+                nm = prof_data.get("name", "").replace("ИП", "").strip()
                 parts = [p.strip(". ") for p in nm.replace(".", " ").split() if p.strip(". ")]
                 if parts:
                     settings.seller.last_name = parts[0]
@@ -199,13 +233,35 @@ with tab_settings:
                         settings.seller.first_name = parts[1]
                     if len(parts) > 2 and len(parts[2]) > 1:
                         settings.seller.middle_name = parts[2]
-                st.success("Подтянуто. Остальные поля заполни вручную.")
+                st.success(
+                    f"Подтянуто: **{prof_data.get('name','')}**, ИНН "
+                    f"`{prof_data.get('inn','')}`. Остальные поля заполни "
+                    "вручную."
+                )
+            else:
+                msg = str(last_err) if last_err else "неизвестная ошибка"
+                if "429" in msg:
+                    st.error(
+                        "WB и после нескольких ретраев возвращает 429 на "
+                        "`/seller-info`. Подожди 2–5 минут и попробуй ещё "
+                        "раз. Или заполни ФИО/ИНН вручную — это ровно то, "
+                        "что WB отдаёт, и больше ничего."
+                    )
+                else:
+                    st.error(f"Не получилось: {msg}")
     with col_auto2:
         if profile:
             st.info(
-                f"WB API возвращает: **{profile.name}**, ИНН `{profile.inn}`. "
-                "Остальные реквизиты (полное ФИО, адрес, ОГРНИП, банк) заполняются вручную — "
-                "один раз, потом сохранятся в `settings.yaml`."
+                f"WB API возвращает только: **{profile.name}**, ИНН "
+                f"`{profile.inn}`. Остальные реквизиты (полное ФИО, адрес, "
+                "ОГРНИП, банк) заполняются вручную — один раз, потом "
+                "сохранятся в `settings.yaml`."
+            )
+        else:
+            st.info(
+                "Нажми «🔄 Подтянуть из WB API» чтобы автоматически заполнить "
+                "ИНН, фамилию и бренд (остальное — вручную). Или просто "
+                "заполни всё сам в полях ниже."
             )
 
     st.divider()
