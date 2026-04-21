@@ -22,6 +22,10 @@
 
 Нужен **Python 3.9+**.
 
+## 1. Запускаем Терминал и 
+
+## 2. Вставляем код (тем самым скачиваем и устанавливаем проект)
+
 ```bash
 git clone https://github.com/takeshymsi-cpu/wb-upd.git
 cd wb-upd
@@ -31,11 +35,28 @@ source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-## Запуск
+## 3. Запускаем программу
 
 ```bash
 streamlit run app.py
 ```
+
+> 👋 Welcome to Streamlit!
+>
+> If you’d like to receive helpful onboarding emails, news, offers, promotions,
+> and the occasional swag, please enter your email address below. Otherwise,
+> leave this field blank.
+>
+> Email:  
+
+Перевод
+>👋 Добро пожаловать в Streamlit!
+>
+>Если вы хотите получать полезные электронные письма о начале работы, новости, предложения, акции,
+>и иногда сувениры, пожалуйста, введите свой адрес электронной почты ниже. В противном случае,
+>оставьте это поле пустым.
+
+После ввода Email 
 
 Откроется http://localhost:8501.
 
