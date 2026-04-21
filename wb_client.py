@@ -67,7 +67,16 @@ class WBClient:
 
     # ---- common-api ----------------------------------------------------
     def get_seller_profile(self) -> SellerProfile:
-        r = self.session.get(f"{COMMON_API}/api/v1/seller-info", timeout=self.timeout)
+        # `/seller-info` у WB жёстко лимитирован (~1 rpm), поэтому держим
+        # несколько ретраев с экспоненциальным backoff на 429.
+        for attempt in range(4):
+            r = self.session.get(
+                f"{COMMON_API}/api/v1/seller-info", timeout=self.timeout
+            )
+            if r.status_code == 429 and attempt < 3:
+                time.sleep(2.0 * (attempt + 1))  # 2 / 4 / 6 сек
+                continue
+            break
         r.raise_for_status()
         d = r.json()
         return SellerProfile(
