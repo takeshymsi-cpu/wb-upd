@@ -59,25 +59,16 @@ def _save_token_to_env(token: str) -> None:
     env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-WB_TOKEN_URL = "https://seller.wildberries.ru/supplier-settings/access-to-api"
-
-
 # ---- сайдбар: статус подключения к WB ------------------------------------
 def _render_token_form(error_msg: str | None = None) -> None:
     """Форма ввода токена WB. Показывается, если токена нет или он неверный."""
     if error_msg:
         st.error(error_msg)
 
-    st.link_button(
-        "🔗 Открыть страницу токенов в WB",
-        WB_TOKEN_URL,
-        use_container_width=True,
-    )
-
     with st.expander("📋 Как создать токен (пошагово)", expanded=False):
         st.markdown(
             """
-1. Открой ссылку выше → кнопка **«Создать токен»**.
+1. В кабинете продавца WB: **Настройки → Доступ к API** → **«Создать токен»**.
 2. Вкладка **«Для интеграции вручную»**.
 3. Тип токена: **«Базовый токен»** (для сторонних решений).
 4. **Название**: любое, например `wb upd`.
