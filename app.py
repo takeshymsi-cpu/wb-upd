@@ -370,15 +370,23 @@ with tab_settings:
 
 
 # ═══════════ ВКЛАДКА УВЕДОМЛЕНИЙ ══════════════════════════════════════════
-def _generate_upd_for(entry, client) -> tuple[Path, dict]:
+def _generate_upd_for(entry, client, upd_date: date | None = None) -> tuple[Path, dict]:
     """Скачивает уведомление, строит XML, сохраняет и пишет в журнал.
+
+    `upd_date` — дата УПД (если не задана, берётся сегодняшняя). Время
+    берётся текущее, чтобы поле «время» в XML было осмысленным.
     Возвращает путь к файлу и сводку."""
     file_name, zip_bytes = client.download_document(entry.service_name)
     xlsx_bytes = extract_xlsx_from_zip(zip_bytes)
     notice = parse_notice_xlsx(xlsx_bytes)
-    xml_bytes = build_upd_xml(notice, settings)
 
-    out_path = OUTPUT_DIR / f"УПД_{notice.number}_{notice.notice_date.strftime('%Y-%m-%d')}.xml"
+    chosen = upd_date or date.today()
+    now_t = datetime.now()
+    doc_dt = datetime(chosen.year, chosen.month, chosen.day,
+                      now_t.hour, now_t.minute, now_t.second)
+    xml_bytes = build_upd_xml(notice, settings, doc_date=doc_dt)
+
+    out_path = OUTPUT_DIR / f"УПД_{notice.number}_{chosen.strftime('%Y-%m-%d')}.xml"
     out_path.write_bytes(xml_bytes)
 
     total_sum = sum(i.sum_with_vat for i in notice.items)
@@ -388,7 +396,7 @@ def _generate_upd_for(entry, client) -> tuple[Path, dict]:
         notice_name=entry.name,
         notice_date=notice.notice_date.isoformat(),
         upd_number=notice.number,
-        upd_date=datetime.now().strftime("%Y-%m-%d"),
+        upd_date=chosen.strftime("%Y-%m-%d"),
         xml_path=str(out_path),
         total_sum=total_sum,
         items_count=len(notice.items),
@@ -417,7 +425,7 @@ with tab_notices:
     st.caption("Список из WB API. Сгенерированные УПД сохраняются в папку `output/`.")
 
     default_since = date(date.today().year, 1, 1)
-    col1, col_since, col2, col_dl, _ = st.columns([1, 1.2, 1.4, 1.4, 2])
+    col1, col_since, col_upd, col2, col_dl = st.columns([1, 1.1, 1.1, 1.4, 1.4])
     if col1.button("🔄 Обновить список"):
         st.session_state.pop("notices", None)
     since = col_since.date_input(
@@ -429,6 +437,15 @@ with tab_notices:
     if since != st.session_state.get("notices_since"):
         st.session_state.notices_since = since
         st.session_state.pop("notices", None)
+
+    upd_date = col_upd.date_input(
+        "Дата УПД",
+        value=st.session_state.get("upd_date", date.today()),
+        format="DD.MM.YYYY",
+        key="upd_date_input",
+        help="Эта дата проставится во всех УПД, сформированных ниже",
+    )
+    st.session_state.upd_date = upd_date
 
     if client and profile:
         if "notices" not in st.session_state:
@@ -467,7 +484,7 @@ with tab_notices:
                     if i > 1:
                         time.sleep(1.0)  # не долбим WB чаще ~1 rps
                     try:
-                        path, summary = _generate_upd_for(entry, client)
+                        path, summary = _generate_upd_for(entry, client, upd_date)
                         st.toast(f"✓ УПД {summary['number']} · {summary['items']} поз. · {summary['total']:.2f} ₽")
                     except Exception as e:
                         errors.append((entry.name, str(e)))
@@ -516,7 +533,7 @@ with tab_notices:
                     if c3.button(btn_label, key=f"gen_{n.service_name}", type="primary"):
                         with st.spinner("Собираю УПД…"):
                             try:
-                                path, summary = _generate_upd_for(n, client)
+                                path, summary = _generate_upd_for(n, client, upd_date)
                                 st.toast(f"✓ УПД {summary['number']} · {summary['items']} поз. · {summary['total']:.2f} ₽")
                                 st.rerun()
                             except Exception as e:
