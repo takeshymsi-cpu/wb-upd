@@ -5,7 +5,7 @@ import io
 import os
 import time
 import zipfile
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import streamlit as st
@@ -370,17 +370,24 @@ with tab_settings:
 
 
 # ═══════════ ВКЛАДКА УВЕДОМЛЕНИЙ ══════════════════════════════════════════
-def _generate_upd_for(entry, client, upd_date: date | None = None) -> tuple[Path, dict]:
+def _generate_upd_for(entry, client) -> tuple[Path, dict]:
     """Скачивает уведомление, строит XML, сохраняет и пишет в журнал.
 
-    `upd_date` — дата УПД (если не задана, берётся сегодняшняя). Время
-    берётся текущее, чтобы поле «время» в XML было осмысленным.
+    Дата УПД = дата уведомления + 1 день, но не позже сегодняшней.
+    Время берётся текущее, чтобы поле «время» в XML было осмысленным.
     Возвращает путь к файлу и сводку."""
     file_name, zip_bytes = client.download_document(entry.service_name)
     xlsx_bytes = extract_xlsx_from_zip(zip_bytes)
     notice = parse_notice_xlsx(xlsx_bytes)
 
-    chosen = upd_date or date.today()
+    notice_d = notice.notice_date
+    if isinstance(notice_d, datetime):
+        notice_d = notice_d.date()
+    chosen = notice_d + timedelta(days=1)
+    today = date.today()
+    if chosen > today:
+        chosen = today
+
     now_t = datetime.now()
     doc_dt = datetime(chosen.year, chosen.month, chosen.day,
                       now_t.hour, now_t.minute, now_t.second)
@@ -425,7 +432,7 @@ with tab_notices:
     st.caption("Список из WB API. Сгенерированные УПД сохраняются в папку `output/`.")
 
     default_since = date(date.today().year, 1, 1)
-    col1, col_since, col_upd, col2, col_dl = st.columns([1, 1.1, 1.1, 1.4, 1.4])
+    col1, col_since, col2, col_dl, _ = st.columns([1, 1.2, 1.4, 1.4, 2])
     if col1.button("🔄 Обновить список"):
         st.session_state.pop("notices", None)
     since = col_since.date_input(
@@ -438,14 +445,7 @@ with tab_notices:
         st.session_state.notices_since = since
         st.session_state.pop("notices", None)
 
-    upd_date = col_upd.date_input(
-        "Дата УПД",
-        value=st.session_state.get("upd_date", date.today()),
-        format="DD.MM.YYYY",
-        key="upd_date_input",
-        help="Эта дата проставится во всех УПД, сформированных ниже",
-    )
-    st.session_state.upd_date = upd_date
+    st.caption("Дата УПД = дата уведомления + 1 день (но не позже сегодня).")
 
     if client and profile:
         if "notices" not in st.session_state:
@@ -484,7 +484,7 @@ with tab_notices:
                     if i > 1:
                         time.sleep(1.0)  # не долбим WB чаще ~1 rps
                     try:
-                        path, summary = _generate_upd_for(entry, client, upd_date)
+                        path, summary = _generate_upd_for(entry, client)
                         st.toast(f"✓ УПД {summary['number']} · {summary['items']} поз. · {summary['total']:.2f} ₽")
                     except Exception as e:
                         errors.append((entry.name, str(e)))
@@ -533,7 +533,7 @@ with tab_notices:
                     if c3.button(btn_label, key=f"gen_{n.service_name}", type="primary"):
                         with st.spinner("Собираю УПД…"):
                             try:
-                                path, summary = _generate_upd_for(n, client, upd_date)
+                                path, summary = _generate_upd_for(n, client)
                                 st.toast(f"✓ УПД {summary['number']} · {summary['items']} поз. · {summary['total']:.2f} ₽")
                                 st.rerun()
                             except Exception as e:
