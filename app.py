@@ -5,7 +5,7 @@ import io
 import os
 import time
 import zipfile
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from pathlib import Path
 
 import streamlit as st
@@ -373,17 +373,30 @@ with tab_settings:
 def _generate_upd_for(entry, client) -> tuple[Path, dict]:
     """Скачивает уведомление, строит XML, сохраняет и пишет в журнал.
 
-    Дата УПД = дата уведомления + 1 день, но не позже сегодняшней.
+    Дата УПД = дата получения уведомления нами (когда WB его направил,
+    entry.creation_time). Если по какой-то причине её нет — fallback на
+    дату из шапки уведомления. Не позже сегодняшней.
     Время берётся текущее, чтобы поле «время» в XML было осмысленным.
     Возвращает путь к файлу и сводку."""
     file_name, zip_bytes = client.download_document(entry.service_name)
     xlsx_bytes = extract_xlsx_from_zip(zip_bytes)
     notice = parse_notice_xlsx(xlsx_bytes)
 
-    notice_d = notice.notice_date
-    if isinstance(notice_d, datetime):
-        notice_d = notice_d.date()
-    chosen = notice_d + timedelta(days=1)
+    chosen = None
+    raw_ct = getattr(entry, "creation_time", None)
+    if raw_ct:
+        try:
+            chosen = datetime.fromisoformat(
+                str(raw_ct).replace("Z", "+00:00")
+            ).date()
+        except ValueError:
+            chosen = None
+    if chosen is None:
+        notice_d = notice.notice_date
+        if isinstance(notice_d, datetime):
+            notice_d = notice_d.date()
+        chosen = notice_d
+
     today = date.today()
     if chosen > today:
         chosen = today
@@ -445,7 +458,7 @@ with tab_notices:
         st.session_state.notices_since = since
         st.session_state.pop("notices", None)
 
-    st.caption("Дата УПД = дата уведомления + 1 день (но не позже сегодня).")
+    st.caption("Дата УПД = дата получения уведомления от WB (не позже сегодня).")
 
     if client and profile:
         if "notices" not in st.session_state:
